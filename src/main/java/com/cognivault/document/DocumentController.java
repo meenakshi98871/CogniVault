@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+@CrossOrigin(origins = "http://localhost:5173")
 @RestController
 @RequestMapping("/api/documents")
 public class DocumentController {
@@ -16,14 +17,20 @@ public class DocumentController {
     private final TextChunkingService chunkingService;
     private final DocumentStore documentStore;
     private final EmbeddingService embeddingService;
+    private final SemanticSearchService semanticSearchService;
+    private final AnswerGenerationService answerGenerationService;
 
     public DocumentController(
         TextChunkingService chunkingService,
         DocumentStore documentStore,
-        EmbeddingService embeddingService) {
+        EmbeddingService embeddingService,
+        SemanticSearchService semanticSearchService,
+        AnswerGenerationService answerGenerationService) {
     this.chunkingService = chunkingService;
     this.documentStore = documentStore;
     this.embeddingService = embeddingService;
+    this.semanticSearchService = semanticSearchService;
+    this.answerGenerationService = answerGenerationService;
 }
 
     @GetMapping("/health")
@@ -74,5 +81,31 @@ documentStore.saveChunks(chunks);
         public int getEmbeddingCount() {
             return documentStore.getAllEmbeddings().size();
         }
-        
+
+        @GetMapping("/search")
+        public List<DocumentChunk> searchDocuments(
+                @RequestParam("q") String query,
+                @RequestParam(defaultValue = "3") int topK) {
+
+            return semanticSearchService.search(query, topK);
+        }
+
+        @GetMapping("/ask")
+public String askQuestion(@RequestParam("q") String question) {
+
+    List<DocumentChunk> relevantChunks =
+            semanticSearchService.search(question, 3);
+
+    if (relevantChunks.isEmpty()) {
+        return "No relevant document chunks found.";
+    }
+
+    String context = relevantChunks.stream()
+            .map(DocumentChunk::getContent)
+            .reduce("", (first, second) -> first + "\n" + second);
+
+    return answerGenerationService.generateAnswer(
+            question, context);
+}
+
 }
