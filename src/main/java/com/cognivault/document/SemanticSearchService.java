@@ -1,77 +1,66 @@
 
 package com.cognivault.document;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 
 @Service
 public class SemanticSearchService {
 
     private final EmbeddingService embeddingService;
-    private final DocumentStore documentStore;
+    private final JdbcTemplate jdbcTemplate;
 
     public SemanticSearchService(
             EmbeddingService embeddingService,
-            DocumentStore documentStore) {
+            JdbcTemplate jdbcTemplate) {
         this.embeddingService = embeddingService;
-        this.documentStore = documentStore;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     public List<DocumentChunk> search(String query, int topK) {
 
+        if (query == null || query.isBlank() || topK <= 0) {
+            return List.of();
+        }
+
         List<Double> queryEmbedding =
                 embeddingService.generateEmbedding(query);
 
-        Map<String, List<Double>> storedEmbeddings =
-                documentStore.getAllEmbeddings();
-
-        return storedEmbeddings.entrySet().stream()
-                .map(entry -> Map.entry(
-                        entry.getKey(),
-                        cosineSimilarity(
-                                queryEmbedding, entry.getValue())))
-                .sorted(Map.Entry.<String, Double>comparingByValue(
-                        Comparator.reverseOrder()))
-                .limit(topK)
-                .map(entry -> documentStore.getAllChunks().stream()
-                        .filter(chunk -> chunk.getId()
-                                .equals(entry.getKey()))
-                        .findFirst()
-                        .orElse(null))
-                .filter(chunk -> chunk != null)
-                .toList();
-    }
-
-    private double cosineSimilarity(
-            List<Double> first, List<Double> second) {
-
-        if (first.size() != second.size()) {
+        if (queryEmbedding.size() != 768) {
             throw new IllegalArgumentException(
-                    "Embedding dimensions do not match");
+                    "Query embedding must contain 768 dimensions.");
         }
 
-        double dotProduct = 0.0;
-        double firstMagnitude = 0.0;
-        double secondMagnitude = 0.0;
+        StringBuilder vector = new StringBuilder("[");
 
-        for (int i = 0; i < first.size(); i++) {
-            double a = first.get(i);
-            double b = second.get(i);
-
-            dotProduct += a * b;
-            firstMagnitude += a * a;
-            secondMagnitude += b * b;
+        for (int i = 0; i < queryEmbedding.size(); i++) {
+            if (i > 0) {
+                vector.append(",");
+            }
+            vector.append(queryEmbedding.get(i));
         }
 
-        if (firstMagnitude == 0 || secondMagnitude == 0) {
-            return 0.0;
-        }
+        vector.append("]");
 
-        return dotProduct
-                / (Math.sqrt(firstMagnitude)
-                * Math.sqrt(secondMagnitude));
+        return jdbcTemplate.query(
+                """
+                SELECT dc.id, d.name AS document_name,
+                       dc.chunk_index, dc.content
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                ORDER BY dc.embedding <=> ?::vector
+                LIMIT ?
+                """,
+                (rs, rowNum) -> new DocumentChunk(
+                        String.valueOf(rs.getLong("id")),
+                        rs.getString("document_name"),
+                        rs.getInt("chunk_index"),
+                        rs.getString("content")
+                ),
+                vector.toString(),
+                topK
+        );
     }
 }

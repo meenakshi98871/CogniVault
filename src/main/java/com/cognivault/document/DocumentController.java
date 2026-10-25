@@ -1,13 +1,24 @@
 
 package com.cognivault.document;
+import com.cognivault.agent.QueryUnderstandingAgent;
+import com.cognivault.agent.PlanningAgent;
+import com.cognivault.agent.RetrievalAgent;
+import com.cognivault.agent.ReasoningAgent;
+import java.util.Map;
 
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import java.util.Map;
+
+
+
+import com.cognivault.agent.QueryUnderstandingAgent;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 @CrossOrigin(origins = "http://localhost:5173")
 @RestController
@@ -19,18 +30,30 @@ public class DocumentController {
     private final EmbeddingService embeddingService;
     private final SemanticSearchService semanticSearchService;
     private final AnswerGenerationService answerGenerationService;
+    private final QueryUnderstandingAgent queryUnderstandingAgent;
+    private final PlanningAgent planningAgent;
+    private final RetrievalAgent retrievalAgent;
+    private final ReasoningAgent reasoningAgent;
 
     public DocumentController(
         TextChunkingService chunkingService,
         DocumentStore documentStore,
         EmbeddingService embeddingService,
         SemanticSearchService semanticSearchService,
-        AnswerGenerationService answerGenerationService) {
+        AnswerGenerationService answerGenerationService,
+        QueryUnderstandingAgent queryUnderstandingAgent,
+        PlanningAgent planningAgent,
+        RetrievalAgent retrievalAgent,
+        ReasoningAgent reasoningAgent) {
     this.chunkingService = chunkingService;
     this.documentStore = documentStore;
     this.embeddingService = embeddingService;
     this.semanticSearchService = semanticSearchService;
     this.answerGenerationService = answerGenerationService;
+    this.queryUnderstandingAgent = queryUnderstandingAgent;
+    this.planningAgent = planningAgent;
+    this.retrievalAgent = retrievalAgent;
+    this.reasoningAgent = reasoningAgent;
 }
 
     @GetMapping("/health")
@@ -56,10 +79,10 @@ public class DocumentController {
     List<Double> embedding =
             embeddingService.generateEmbedding(chunk.getContent());
 
-    documentStore.saveEmbedding(chunk.getId(), embedding);
+    documentStore.saveChunkWithEmbedding(chunk, embedding);
 }
 
-documentStore.saveChunks(chunks);
+
 
         return "Document received: " + file.getOriginalFilename()
                 + "\nCharacters extracted: " + content.length()
@@ -77,9 +100,9 @@ documentStore.saveChunks(chunks);
             return documentStore.getChunkCount();
         }
 
-        @GetMapping("/embeddings/count")
+       @GetMapping("/embeddings/count")
         public int getEmbeddingCount() {
-            return documentStore.getAllEmbeddings().size();
+            return documentStore.getEmbeddingCount();
         }
 
         @GetMapping("/search")
@@ -106,6 +129,41 @@ public String askQuestion(@RequestParam("q") String question) {
 
     return answerGenerationService.generateAnswer(
             question, context);
+}
+
+@GetMapping("/understand")
+public Map<String, Object> understandQuery(
+        @RequestParam("q") String question) {
+
+    return queryUnderstandingAgent.understandQuery(question);
+}
+
+@GetMapping("/plan")
+public Map<String, Object> createPlan(
+        @RequestParam("q") String question) {
+
+    Map<String, Object> analysis =
+            queryUnderstandingAgent.understandQuery(question);
+
+    return planningAgent.createPlan(analysis);
+}
+@GetMapping("/retrieve")
+public Map<String, Object> retrieveDocuments(
+        @RequestParam("q") String query,
+        @RequestParam(defaultValue = "3") int topK) {
+
+    return retrievalAgent.retrieve(query, topK);
+}
+@GetMapping("/reason")
+public String reasonAboutDocuments(
+        @RequestParam("q") String question) {
+
+    Map<String, Object> retrieval =
+            retrievalAgent.retrieve(question, 3);
+
+    String context = (String) retrieval.get("context");
+
+    return reasoningAgent.reason(question, context);
 }
 
 }
