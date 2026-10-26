@@ -1,0 +1,1 @@
+CogniVault is an Agentic RAG system that retrieves relevant information from documents.

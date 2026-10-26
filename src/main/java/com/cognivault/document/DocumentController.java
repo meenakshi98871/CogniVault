@@ -1,24 +1,23 @@
 
 package com.cognivault.document;
-import com.cognivault.agent.QueryUnderstandingAgent;
+import com.cognivault.agent.MemoryAgent;
+import com.cognivault.agent.MemoryRepository;
 import com.cognivault.agent.PlanningAgent;
-import com.cognivault.agent.RetrievalAgent;
-import com.cognivault.agent.ReasoningAgent;
-import java.util.Map;
-
-import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-import java.util.Map;
-
-
-
 import com.cognivault.agent.QueryUnderstandingAgent;
+import com.cognivault.agent.ReasoningAgent;
+import com.cognivault.agent.RetrievalAgent;
+import com.cognivault.conversation.ConversationManager;
+import com.cognivault.conversation.ConversationMemoryService;
+import com.cognivault.conversation.ConversationMessage;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
 
 @CrossOrigin(origins = "http://localhost:5173")
 @RestController
@@ -34,6 +33,10 @@ public class DocumentController {
     private final PlanningAgent planningAgent;
     private final RetrievalAgent retrievalAgent;
     private final ReasoningAgent reasoningAgent;
+    private final MemoryAgent memoryAgent;
+    private final MemoryRepository memoryRepository;
+    private final ConversationManager conversationManager;
+    private final ConversationMemoryService conversationMemoryService;
 
     public DocumentController(
         TextChunkingService chunkingService,
@@ -44,7 +47,11 @@ public class DocumentController {
         QueryUnderstandingAgent queryUnderstandingAgent,
         PlanningAgent planningAgent,
         RetrievalAgent retrievalAgent,
-        ReasoningAgent reasoningAgent) {
+        ReasoningAgent reasoningAgent,
+        MemoryAgent memoryAgent,
+    MemoryRepository memoryRepository,
+    ConversationManager conversationManager,
+    ConversationMemoryService conversationMemoryService) {
     this.chunkingService = chunkingService;
     this.documentStore = documentStore;
     this.embeddingService = embeddingService;
@@ -54,6 +61,11 @@ public class DocumentController {
     this.planningAgent = planningAgent;
     this.retrievalAgent = retrievalAgent;
     this.reasoningAgent = reasoningAgent;
+    this.memoryAgent = memoryAgent;
+    this.memoryRepository = memoryRepository;
+    this.conversationManager = conversationManager;
+    this.conversationMemoryService = conversationMemoryService;
+    
 }
 
     @GetMapping("/health")
@@ -165,5 +177,48 @@ public String reasonAboutDocuments(
 
     return reasoningAgent.reason(question, context);
 }
+
+@PostMapping("/memory/summarize")
+public Map<String, String> summarizeMemory(
+        @RequestBody Map<String, String> request) {
+
+    String information = request.get("text");
+
+    String summary = memoryAgent.createMemory(information);
+
+    return Map.of("summary", summary);
+}
+
+
+@GetMapping("/memory")
+public java.util.List<java.util.Map<String, Object>> getMemories() {
+    return memoryRepository.getAllMemories();
+}
+
+@PostMapping("/conversation/message")
+public Map<String, Object> addConversationMessage(
+        @RequestBody Map<String, String> request) {
+
+    String role = request.get("role");
+    String content = request.get("content");
+
+    conversationManager.addMessage(role, content);
+
+    boolean windowProcessed =
+            conversationMemoryService.processWindowIfNeeded();
+
+    return Map.of(
+            "message", "Message added successfully.",
+            "windowProcessed", windowProcessed,
+            "activeMessageCount",
+            conversationManager.getMessages().size()
+    );
+}
+
+@GetMapping("/conversation/messages")
+public List<ConversationMessage> getConversationMessages() {
+    return conversationManager.getMessages();
+}
+
 
 }
